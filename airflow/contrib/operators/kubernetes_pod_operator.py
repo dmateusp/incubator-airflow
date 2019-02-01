@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from airflow.exceptions import AirflowException
+from airflow.exceptions import AirflowException, AirflowTaskTimeout
 from airflow.models import BaseOperator
 from airflow.utils.decorators import apply_defaults
 from airflow.contrib.kubernetes import kube_client, pod_generator, pod_launcher
@@ -117,13 +117,21 @@ class KubernetesPodOperator(BaseOperator):
 
             launcher = pod_launcher.PodLauncher(kube_client=client,
                                                 extract_xcom=self.xcom_push)
-            (final_state, result) = launcher.run_pod(
-                pod,
-                startup_timeout=self.startup_timeout_seconds,
-                get_logs=self.get_logs)
 
-            if self.is_delete_operator_pod:
+            try:
+                (final_state, result) = launcher.run_pod(
+                    pod,
+                    startup_timeout=self.startup_timeout_seconds,
+                    get_logs=self.get_logs)
+
+                if self.is_delete_operator_pod:
+                    launcher.delete_pod(pod)
+            except AirflowTaskTimeout as ex:
+                self.log.error('Task timed out! : {error}'.format(error=ex))
+                self.log.info('Deleting pod..')
                 launcher.delete_pod(pod)
+                self.log.info('Done')
+                raise ex
 
             if final_state != State.SUCCESS:
                 raise AirflowException(
@@ -132,7 +140,7 @@ class KubernetesPodOperator(BaseOperator):
             if self.xcom_push:
                 return result
         except AirflowException as ex:
-            raise AirflowException('Pod Launching failed: {error}'.format(error=ex))
+            raise AirflowException('An exception occurred when running the pod: {error}'.format(error=ex))
 
     @apply_defaults
     def __init__(self,
