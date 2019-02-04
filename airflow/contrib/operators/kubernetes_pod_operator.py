@@ -128,9 +128,8 @@ class KubernetesPodOperator(BaseOperator):
                     launcher.delete_pod(pod)
             except AirflowTaskTimeout as ex:
                 self.log.error('Task timed out! : {error}'.format(error=ex))
-                self.log.info('Deleting pod..')
+                self.log.info('Deleting the pod')
                 launcher.delete_pod(pod)
-                self.log.info('Done')
                 raise ex
 
             if final_state != State.SUCCESS:
