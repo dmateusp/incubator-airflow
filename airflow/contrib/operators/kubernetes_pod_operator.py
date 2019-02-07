@@ -84,56 +84,53 @@ class KubernetesPodOperator(BaseOperator):
     template_fields = ('cmds', 'arguments', 'env_vars', 'config_file')
 
     def execute(self, context):
-        try:
-            client = kube_client.get_kube_client(in_cluster=self.in_cluster,
-                                                 cluster_context=self.cluster_context,
-                                                 config_file=self.config_file)
-            gen = pod_generator.PodGenerator()
+        client = kube_client.get_kube_client(in_cluster=self.in_cluster,
+                                             cluster_context=self.cluster_context,
+                                             config_file=self.config_file)
+        gen = pod_generator.PodGenerator()
 
-            for mount in self.volume_mounts:
-                gen.add_mount(mount)
-            for volume in self.volumes:
-                gen.add_volume(volume)
+        for mount in self.volume_mounts:
+            gen.add_mount(mount)
+        for volume in self.volumes:
+            gen.add_volume(volume)
 
-            self.pod = gen.make_pod(
-                namespace=self.namespace,
-                image=self.image,
-                pod_id=self.name,
-                cmds=self.cmds,
-                arguments=self.arguments,
-                labels=self.labels,
+        self.pod = gen.make_pod(
+            namespace=self.namespace,
+            image=self.image,
+            pod_id=self.name,
+            cmds=self.cmds,
+            arguments=self.arguments,
+            labels=self.labels,
+        )
+
+        self.pod.service_account_name = self.service_account_name
+        self.pod.secrets = self.secrets
+        self.pod.envs = self.env_vars
+        self.pod.image_pull_policy = self.image_pull_policy
+        self.pod.annotations = self.annotations
+        self.pod.resources = self.resources
+        self.pod.affinity = self.affinity
+        self.pod.node_selectors = self.node_selectors
+        self.pod.hostnetwork = self.hostnetwork
+        self.pod.tolerations = self.tolerations
+
+        self.launcher = pod_launcher.PodLauncher(kube_client=client,
+                                                 extract_xcom=self.xcom_push)
+
+        (final_state, result) = self.launcher.run_pod(
+            self.pod,
+            startup_timeout=self.startup_timeout_seconds,
+            get_logs=self.get_logs)
+
+        if self.is_delete_operator_pod:
+            self.launcher.delete_pod(self.pod)
+
+        if final_state != State.SUCCESS:
+            raise AirflowException(
+                'Pod returned a failure: {state}'.format(state=final_state)
             )
-
-            self.pod.service_account_name = self.service_account_name
-            self.pod.secrets = self.secrets
-            self.pod.envs = self.env_vars
-            self.pod.image_pull_policy = self.image_pull_policy
-            self.pod.annotations = self.annotations
-            self.pod.resources = self.resources
-            self.pod.affinity = self.affinity
-            self.pod.node_selectors = self.node_selectors
-            self.pod.hostnetwork = self.hostnetwork
-            self.pod.tolerations = self.tolerations
-
-            self.launcher = pod_launcher.PodLauncher(kube_client=client,
-                                                     extract_xcom=self.xcom_push)
-
-            (final_state, result) = self.launcher.run_pod(
-                self.pod,
-                startup_timeout=self.startup_timeout_seconds,
-                get_logs=self.get_logs)
-
-            if self.is_delete_operator_pod:
-                self.launcher.delete_pod(self.pod)
-
-            if final_state != State.SUCCESS:
-                raise AirflowException(
-                    'Pod returned a failure: {state}'.format(state=final_state)
-                )
-            if self.xcom_push:
-                return result
-        except AirflowException as ex:
-            raise AirflowException('An exception occurred when running the pod: {error}'.format(error=ex))
+        if self.xcom_push:
+            return result
 
     def on_kill(self):
         if self.launcher is not None:
