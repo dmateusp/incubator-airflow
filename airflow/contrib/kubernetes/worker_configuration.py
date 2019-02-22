@@ -40,12 +40,21 @@ class WorkerConfiguration(LoggingMixin):
 
         super(WorkerConfiguration, self).__init__()
 
-    def _get_init_containers(self, volume_mounts):
+    def _get_init_containers(self):
         """When using git to retrieve the DAGs, use the GitSync Init Container"""
         # If we're using volume claims to mount the dags, no init container is needed
         if self.kube_config.dags_volume_claim or \
            self.kube_config.dags_volume_host or self.kube_config.dags_in_image:
             return []
+
+        if self.dags_volume_name not in volume_mounts:
+            raise AirflowException(
+                "GitSync enabled but volume %s is not defined." % self.dags_volume_name)
+
+        volume_mounts = [{
+            'mountPath': self.kube_config.git_sync_root,
+            'name': self.dags_volume_name
+        }]
 
         # Otherwise, define a git-sync init container
         init_environment = [{
@@ -77,20 +86,32 @@ class WorkerConfiguration(LoggingMixin):
                 'name': 'GIT_SYNC_PASSWORD',
                 'value': self.kube_config.git_password
             })
-
-        if self.dags_volume_name not in volume_mounts:
-            raise AirflowException(
-                "GitSync enabled but volume %s is not defined." % self.dags_volume_name)
-
-        volume_mounts[self.dags_volume_name]['mountPath'] = self.kube_config.git_sync_root
-        volume_mounts[self.dags_volume_name]['readOnly'] = False
+        if self.kube_config.git_ssh_key_secret_name:
+            volume_mounts.append({
+                'name': 'dags-repo-secret',
+                'mountPath': '/etc/git-secret'
+            })
+            init_environment.extend([
+                {
+                    'name': 'GIT_SSH_KEY_FILE',
+                    'value': '/etc/git-secret/ssh'
+                },
+                {
+                    'name': 'GIT_KNOWN_HOSTS',
+                    'value': 'false'
+                },
+                {
+                    'name': 'GIT_SYNC_SSH',
+                    'value': 'true'
+                }
+            ])
 
         return [{
             'name': self.kube_config.git_sync_init_container_name,
             'image': self.kube_config.git_sync_container,
-            'securityContext': {'runAsUser': 0},
+            'securityContext': {'runAsUser': 65533},  # git-sync user
             'env': init_environment,
-            'volumeMounts': [value for value in volume_mounts.values()]
+            'volumeMounts': volume_mounts
         }]
 
     def _get_environment(self):
@@ -129,6 +150,15 @@ class WorkerConfiguration(LoggingMixin):
         if not self.kube_config.image_pull_secrets:
             return []
         return self.kube_config.image_pull_secrets.split(',')
+
+    def _get_security_context(self):
+        """Defines the security context"""
+        if self.kube_config.git_ssh_key_secret_name:
+            return {
+                'fsGroup': 65533 # to make SSH key readable
+            }
+        else:
+            return None
 
     def init_volumes_and_mounts(self):
         def _construct_volume(name, claim, host):
@@ -183,6 +213,20 @@ class WorkerConfiguration(LoggingMixin):
             del volumes[self.dags_volume_name]
             del volume_mounts[self.dags_volume_name]
 
+        # Get the SSH key from secrets as a volume
+        if self.kube_config.git_ssh_key_secret_name:
+            volumes.append({
+                'name': 'dags-repo-secret',
+                'secret': {
+                    'secretName': self.kube_config.git_ssh_key_secret_name,
+                    'items': [{
+                        'key': self.kube_config.git_ssh_key_secret_key,
+                        'path': 'ssh',
+                        'mode': 288
+                    }]
+                }
+            })
+
         # Mount the airflow.cfg file via a configmap the user has specified
         if self.kube_config.airflow_configmap:
             config_volume_name = 'airflow-config'
@@ -212,9 +256,9 @@ class WorkerConfiguration(LoggingMixin):
 
     def make_pod(self, namespace, worker_uuid, pod_id, dag_id, task_id, execution_date,
                  try_number, airflow_command, kube_executor_config):
-        volumes_dict, volume_mounts_dict = self.init_volumes_and_mounts()
-        worker_init_container_spec = self._get_init_containers(
-            copy.deepcopy(volume_mounts_dict))
+        dags_volume_name = 'airflow-dags'
+        volumes, volume_mounts = self.init_volumes_and_mounts(dags_volume_name)
+        worker_init_container_spec = self._get_init_containers(dags_volume_name)
         resources = Resources(
             request_memory=kube_executor_config.request_memory,
             request_cpu=kube_executor_config.request_cpu,
@@ -259,4 +303,5 @@ class WorkerConfiguration(LoggingMixin):
                             self.kube_config.kube_node_selectors),
             affinity=affinity,
             tolerations=tolerations
+            security_context=self._get_security_context(),
         )
