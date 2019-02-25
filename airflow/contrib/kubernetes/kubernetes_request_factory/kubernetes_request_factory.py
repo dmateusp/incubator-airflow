@@ -191,7 +191,7 @@ class KubernetesRequestFactory:
     def extract_tolerations(pod, req):
         if pod.tolerations:
             req['spec']['tolerations'] = pod.tolerations
-    
+
     @staticmethod
     def extract_security_context(pod, req):
         if pod.security_context:
