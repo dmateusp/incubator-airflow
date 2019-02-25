@@ -15,11 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import copy
 import os
 import six
 
-from airflow import AirflowException
 from airflow.configuration import conf
 from airflow.contrib.kubernetes.pod import Pod, Resources
 from airflow.contrib.kubernetes.secret import Secret
@@ -46,15 +44,6 @@ class WorkerConfiguration(LoggingMixin):
         if self.kube_config.dags_volume_claim or \
            self.kube_config.dags_volume_host or self.kube_config.dags_in_image:
             return []
-
-        if self.dags_volume_name not in volume_mounts:
-            raise AirflowException(
-                "GitSync enabled but volume %s is not defined." % self.dags_volume_name)
-
-        volume_mounts = [{
-            'mountPath': self.kube_config.git_sync_root,
-            'name': self.dags_volume_name
-        }]
 
         # Otherwise, define a git-sync init container
         init_environment = [{
@@ -86,6 +75,11 @@ class WorkerConfiguration(LoggingMixin):
                 'name': 'GIT_SYNC_PASSWORD',
                 'value': self.kube_config.git_password
             })
+
+        volume_mounts = [{
+            'mountPath': self.kube_config.git_sync_root,
+            'name': self.dags_volume_name
+        }]
         if self.kube_config.git_ssh_key_secret_name:
             volume_mounts.append({
                 'name': 'dags-repo-secret',
@@ -155,7 +149,7 @@ class WorkerConfiguration(LoggingMixin):
         """Defines the security context"""
         if self.kube_config.git_ssh_key_secret_name:
             return {
-                'fsGroup': 65533 # to make SSH key readable
+                'fsGroup': 65533  # to make SSH key readable
             }
         else:
             return None
@@ -256,7 +250,7 @@ class WorkerConfiguration(LoggingMixin):
 
     def make_pod(self, namespace, worker_uuid, pod_id, dag_id, task_id, execution_date,
                  try_number, airflow_command, kube_executor_config):
-        volumes, volume_mounts = self.init_volumes_and_mounts()
+        volumes_dict, volume_mounts_dict = self.init_volumes_and_mounts()
         worker_init_container_spec = self._get_init_containers()
         resources = Resources(
             request_memory=kube_executor_config.request_memory,
