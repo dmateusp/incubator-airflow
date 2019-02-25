@@ -256,9 +256,8 @@ class WorkerConfiguration(LoggingMixin):
 
     def make_pod(self, namespace, worker_uuid, pod_id, dag_id, task_id, execution_date,
                  try_number, airflow_command, kube_executor_config):
-        dags_volume_name = 'airflow-dags'
-        volumes, volume_mounts = self.init_volumes_and_mounts(dags_volume_name)
-        worker_init_container_spec = self._get_init_containers(dags_volume_name)
+        volumes, volume_mounts = self.init_volumes_and_mounts()
+        worker_init_container_spec = self._get_init_containers()
         resources = Resources(
             request_memory=kube_executor_config.request_memory,
             request_cpu=kube_executor_config.request_cpu,
