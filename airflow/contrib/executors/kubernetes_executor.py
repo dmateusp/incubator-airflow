@@ -254,11 +254,13 @@ class KubeConfig:
                 'or `dags_volume_host` '
                 'or `dags_in_image` '
                 'or `git_repo and git_branch and git_dags_folder_mount_point`')
-        if self.git_repo and (self.git_user or self.git_password) and (self.git_ssh_key_secret_name or self.git_ssh_key_secret_key):
+        if self.git_repo \
+           and (self.git_user or self.git_password) \
+           and (self.git_ssh_key_secret_name or self.git_ssh_key_secret_key):
             raise AirflowConfigException(
                 'In kubernetes mode, using `git_repo` to pull the DAGs: '
                 'for private repositories, either `git_user` and `git_password` '
-                'must be set for authentication through user credentials, '
+                'must be set for authentication through user credentials; '
                 'or `git_ssh_key_secret_name` and git_ssh_key_secret_key '
                 'must be set for authentication through ssh key, but not both')
 
