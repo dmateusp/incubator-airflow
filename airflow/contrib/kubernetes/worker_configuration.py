@@ -35,6 +35,7 @@ class WorkerConfiguration(LoggingMixin):
 
         self.dags_volume_name = 'airflow-dags'
         self.logs_volume_name = 'airflow-logs'
+        self.git_sync_ssh_secret_volume_name = 'dags-repo-secret'
 
         super(WorkerConfiguration, self).__init__()
 
@@ -78,11 +79,12 @@ class WorkerConfiguration(LoggingMixin):
 
         volume_mounts = [{
             'mountPath': self.kube_config.git_sync_root,
-            'name': self.dags_volume_name
+            'name': self.dags_volume_name,
+            'readOnly': False
         }]
         if self.kube_config.git_ssh_key_secret_name:
             volume_mounts.append({
-                'name': 'dags-repo-secret',
+                'name': self.git_sync_ssh_secret_volume_name,
                 'mountPath': '/etc/git-secret'
             })
             init_environment.extend([
@@ -209,8 +211,8 @@ class WorkerConfiguration(LoggingMixin):
 
         # Get the SSH key from secrets as a volume
         if self.kube_config.git_ssh_key_secret_name:
-            volumes.append({
-                'name': 'dags-repo-secret',
+            volumes[self.git_sync_ssh_secret_volume_name] = {
+                'name': self.git_sync_ssh_secret_volume_name,
                 'secret': {
                     'secretName': self.kube_config.git_ssh_key_secret_name,
                     'items': [{
@@ -219,7 +221,7 @@ class WorkerConfiguration(LoggingMixin):
                         'mode': 288
                     }]
                 }
-            })
+            }
 
         # Mount the airflow.cfg file via a configmap the user has specified
         if self.kube_config.airflow_configmap:
